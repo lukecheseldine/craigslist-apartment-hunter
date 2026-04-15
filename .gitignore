@@ -1,0 +1,31 @@
+.env
+
+# State / runtime
+state/
+cron.log
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
