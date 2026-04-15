@@ -10,10 +10,12 @@ Designed to be **cron-friendly**: it runs **once** and exits.
 
 ## Requirements
 
-- macOS (or Linux)
-- Python 3
-- Firefox installed
-- Selenium can run Firefox (geckodriver is usually handled automatically by Selenium Manager; if not, install it)
+- macOS or Linux
+- Python 3.10+
+- **Firefox** (local) or **Chrome/Chromium** (optional; set `BROWSER=chrome`)
+- Geckodriver / ChromeDriver as needed (or Selenium Manager on desktop)
+
+**Headless VPS:** Prefer **1–2 GB RAM** for a single Selenium run. On **512 MB** hosts, add **swap** (e.g. 1–2 GB) or the browser may be OOM-killed. Use Mozilla’s `.deb` Firefox on Ubuntu instead of Snap-only automation when possible.
 
 ## Setup
 
@@ -25,7 +27,7 @@ source .venv/bin/activate
 pip install selenium requests python-dotenv
 ```
 
-Create a `.env` file:
+Create a `.env` file (copy from your machine; never commit real tokens):
 
 ```env
 TELEGRAM_BOT_TOKEN=123456:abc...
@@ -33,7 +35,36 @@ TELEGRAM_CHAT_ID=123456789
 HEARTBEAT_SECONDS=3600
 ERROR_NOTIFY_COOLDOWN_SECONDS=900
 HEADLESS=1
+
+# Optional — defaults work on macOS; on Linux VPS set explicitly:
+# BROWSER=firefox
+# FIREFOX_BINARY=/usr/bin/firefox
+# GECKODRIVER_PATH=/usr/local/bin/geckodriver
+
+# Optional — Chrome instead of Firefox:
+# BROWSER=chrome
+# CHROME_BINARY=/usr/bin/google-chrome
+# CHROMEDRIVER_PATH=/usr/bin/chromedriver
+
+# Optional — Selenium Grid / docker-selenium (remote):
+# REMOTE_WEBDRIVER_URL=http://127.0.0.1:4444/wd/hub
 ```
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram bot API |
+| `HEARTBEAT_SECONDS` | Seconds between “still working” messages when nothing new (default 3600) |
+| `HEADLESS` | `1` = headless browser (default) |
+| `BROWSER` | `firefox` (default) or `chrome` |
+| `FIREFOX_BINARY` | Path to Firefox binary (recommended on servers) |
+| `GECKODRIVER_PATH` | Path to geckodriver (recommended on servers) |
+| `CHROME_BINARY`, `CHROMEDRIVER_PATH` | Chrome/Chromium mode |
+| `REMOTE_WEBDRIVER_URL` | If set, uses remote WebDriver instead of local browser |
+| `PAGE_LOAD_TIMEOUT`, `RESULT_WAIT_SECONDS` | Tuning timeouts |
+
+The script sets `dom.ipc.processCount` to **1** to reduce RAM on small VMs.
 
 ## Run once (manual test)
 
@@ -102,4 +133,24 @@ Best options:
 
 Edit `SEARCHES` in `craigslist_watch.py` to add more URLs.
 The script will check every configured search each run.
+
+## Robustness
+
+If the page looks blocked (captcha-like text), has zero result cards, or cards parse but no links are found, the run **raises an error** and Telegram gets an alert (with duplicate suppression). That avoids silently treating a broken page as “no new listings.”
+
+## Linux VPS (DigitalOcean, etc.)
+
+1. Clone the repo, create venv, `pip install selenium requests python-dotenv`.
+2. Install **Firefox** from [Mozilla’s apt repo](https://support.mozilla.org/en-US/kb/install-firefox-linux#w_install-from-your-distribution-package-manager) (not only the Snap stub) and a matching **geckodriver** (e.g. under `/usr/local/bin`).
+3. Set `FIREFOX_BINARY`, `GECKODRIVER_PATH`, and `BROWSER=firefox` in `.env`.
+4. Add swap if RAM is tight: `sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`.
+5. Cron (paths are examples):
+
+```cron
+* * * * * cd /root/craigslist-apartment-hunter && /root/craigslist-apartment-hunter/.venv/bin/python /root/craigslist-apartment-hunter/craigslist_watch.py >> /root/craigslist-apartment-hunter/cron.log 2>&1
+```
+
+## Changelog (recent)
+
+- **2026-04** — Firefox low-memory preference (`dom.ipc.processCount`); optional Chrome and `REMOTE_WEBDRIVER_URL`; explicit `FIREFOX_BINARY` / `GECKODRIVER_PATH`; block/captcha and malformed HTML treated as errors; Pacific timestamps in Telegram.
 

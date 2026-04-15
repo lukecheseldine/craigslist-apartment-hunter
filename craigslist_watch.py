@@ -2,6 +2,7 @@ import json
 import os
 import random
 import re
+import shutil
 import sys
 import time
 import traceback
@@ -16,6 +17,8 @@ from zoneinfo import ZoneInfo
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.support import expected_conditions as EC
@@ -59,6 +62,12 @@ PAGE_LOAD_TIMEOUT = int(os.getenv("PAGE_LOAD_TIMEOUT", "30"))
 RESULT_WAIT_SECONDS = int(os.getenv("RESULT_WAIT_SECONDS", "20"))
 JITTER_SECONDS = (1, 4)
 MAX_MESSAGE_LISTINGS = int(os.getenv("MAX_MESSAGE_LISTINGS", "12"))
+FIREFOX_BINARY = os.getenv("FIREFOX_BINARY", "").strip()
+GECKODRIVER_PATH = os.getenv("GECKODRIVER_PATH", "").strip()
+CHROME_BINARY = os.getenv("CHROME_BINARY", "").strip()
+CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH", "").strip()
+BROWSER = os.getenv("BROWSER", "firefox").strip().lower()
+REMOTE_WEBDRIVER_URL = os.getenv("REMOTE_WEBDRIVER_URL", "").strip()
 
 
 # =========================
@@ -167,18 +176,82 @@ def send_error_notification(error_key: str, message: str) -> None:
 # SELENIUM SETUP
 # =========================
 
-def build_driver() -> webdriver.Firefox:
-    options = FirefoxOptions()
-    if HEADLESS:
-        options.add_argument("--headless")
+def build_driver():
+    if REMOTE_WEBDRIVER_URL:
+        if BROWSER == "chrome":
+            options = ChromeOptions()
+            if HEADLESS:
+                options.add_argument("--headless=new")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-gpu")
+            driver = webdriver.Remote(command_executor=REMOTE_WEBDRIVER_URL, options=options)
+        else:
+            options = FirefoxOptions()
+            if HEADLESS:
+                options.add_argument("--headless")
+            options.set_preference("dom.webdriver.enabled", False)
+            options.set_preference("media.peerconnection.enabled", False)
+            # Keep memory footprint low on small servers.
+            options.set_preference("dom.ipc.processCount", 1)
+            driver = webdriver.Remote(command_executor=REMOTE_WEBDRIVER_URL, options=options)
+        driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
+        return driver
 
-    options.set_preference("dom.webdriver.enabled", False)
-    options.set_preference("media.peerconnection.enabled", False)
+    if BROWSER == "chrome":
+        options = ChromeOptions()
+        if HEADLESS:
+            options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
 
-    driver = webdriver.Firefox(
-        service=FirefoxService(),
-        options=options,
-    )
+        binary_candidates = [
+            CHROME_BINARY,
+            shutil.which("chromium"),
+            shutil.which("chromium-browser"),
+            shutil.which("google-chrome"),
+        ]
+        for candidate in binary_candidates:
+            if candidate and Path(candidate).is_file():
+                options.binary_location = candidate
+                break
+
+        if CHROMEDRIVER_PATH:
+            service = ChromeService(executable_path=CHROMEDRIVER_PATH)
+        else:
+            service = ChromeService()
+
+        driver = webdriver.Chrome(service=service, options=options)
+    else:
+        options = FirefoxOptions()
+        if HEADLESS:
+            options.add_argument("--headless")
+
+        # On some Ubuntu servers, /usr/bin/firefox is a snap wrapper and Selenium
+        # needs the real binary path.
+        binary_candidates = [
+            FIREFOX_BINARY,
+            "/snap/firefox/current/usr/lib/firefox/firefox",
+            shutil.which("firefox"),
+        ]
+        for candidate in binary_candidates:
+            if candidate and Path(candidate).is_file():
+                options.binary_location = candidate
+                break
+
+        options.set_preference("dom.webdriver.enabled", False)
+        options.set_preference("media.peerconnection.enabled", False)
+        # Keep memory footprint low on small servers.
+        options.set_preference("dom.ipc.processCount", 1)
+
+        if GECKODRIVER_PATH:
+            service = FirefoxService(executable_path=GECKODRIVER_PATH)
+        else:
+            service = FirefoxService()
+
+        driver = webdriver.Firefox(service=service, options=options)
+
     driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
     return driver
 
