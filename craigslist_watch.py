@@ -62,6 +62,8 @@ PAGE_LOAD_TIMEOUT = int(os.getenv("PAGE_LOAD_TIMEOUT", "30"))
 RESULT_WAIT_SECONDS = int(os.getenv("RESULT_WAIT_SECONDS", "20"))
 JITTER_SECONDS = (1, 4)
 MAX_MESSAGE_LISTINGS = int(os.getenv("MAX_MESSAGE_LISTINGS", "12"))
+# Skip listings at or below this price (common scam range). Unparseable price = keep listing.
+MIN_PRICE_DOLLARS = float(os.getenv("MIN_PRICE_DOLLARS", "2500"))
 FIREFOX_BINARY = os.getenv("FIREFOX_BINARY", "").strip()
 GECKODRIVER_PATH = os.getenv("GECKODRIVER_PATH", "").strip()
 CHROME_BINARY = os.getenv("CHROME_BINARY", "").strip()
@@ -372,6 +374,33 @@ def normalize_text(parts: Iterable[str]) -> str:
     return " ".join(parts).lower()
 
 
+def parse_price_dollars(price_text: str) -> Optional[float]:
+    """First $ amount in the string, e.g. '$3,200' -> 3200.0; also plain '3,200' in price field."""
+    if not price_text:
+        return None
+    t = price_text.strip()
+    m = re.search(r"\$\s*([\d,]+)", t)
+    if m:
+        try:
+            return float(m.group(1).replace(",", ""))
+        except ValueError:
+            return None
+    if re.fullmatch(r"[\d,]+", t):
+        try:
+            return float(t.replace(",", ""))
+        except ValueError:
+            return None
+    return None
+
+
+def listing_price_for_filter(listing: Listing) -> Optional[float]:
+    """Prefer card price; fall back to title if no price on card."""
+    p = parse_price_dollars(listing.price)
+    if p is not None:
+        return p
+    return parse_price_dollars(listing.title)
+
+
 def passes_filters(listing: Listing) -> bool:
     haystack = normalize_text([listing.title, listing.meta, listing.hood])
 
@@ -381,23 +410,28 @@ def passes_filters(listing: Listing) -> bool:
     if any(keyword.lower() in haystack for keyword in BLOCK_KEYWORDS):
         return False
 
+    price_val = listing_price_for_filter(listing)
+    if price_val is not None and price_val <= MIN_PRICE_DOLLARS:
+        return False
+
     return True
 
 
-def format_listing_line(listing: Listing) -> str:
+def format_listing_block(listing: Listing) -> str:
     details = " ".join(x for x in [listing.price, listing.hood, listing.meta] if x).strip()
     if details:
-        return f"- {listing.title} | {details}\n  {listing.link}"
-    return f"- {listing.title}\n  {listing.link}"
+        return f"{listing.title}\n{details}\n{listing.link}"
+    return f"{listing.title}\n{listing.link}"
 
 
 def format_new_listing_message(new_items: List[Listing]) -> str:
-    lines = [f"[{now_pacific()}] New Craigslist listings: {len(new_items)}"]
-    for item in new_items[:MAX_MESSAGE_LISTINGS]:
-        lines.append(format_listing_line(item))
+    header = f"[{now_pacific()}] New Craigslist listings: {len(new_items)}"
+    blocks = [format_listing_block(item) for item in new_items[:MAX_MESSAGE_LISTINGS]]
+    body = "\n\n".join(blocks)
+    out = f"{header}\n\n{body}"
     if len(new_items) > MAX_MESSAGE_LISTINGS:
-        lines.append(f"(+{len(new_items) - MAX_MESSAGE_LISTINGS} more)")
-    return "\n".join(lines)
+        out += f"\n\n(+{len(new_items) - MAX_MESSAGE_LISTINGS} more)"
+    return out
 
 
 # =========================
@@ -438,6 +472,7 @@ def run_once() -> int:
                 f"[{now_pacific()}] Craigslist watcher initialized. "
                 f"Seeded {total} existing listings, alerts start now."
             )
+            save_last_heartbeat_epoch(int(time.time()))
             return 0
 
         filtered_new_items: List[Listing] = []
@@ -461,6 +496,7 @@ def run_once() -> int:
 
         if filtered_new_items:
             send_telegram(format_new_listing_message(filtered_new_items))
+            save_last_heartbeat_epoch(int(time.time()))
 
         if should_send_heartbeat() and not filtered_new_items:
             send_heartbeat()

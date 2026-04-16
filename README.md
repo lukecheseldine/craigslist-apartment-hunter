@@ -63,8 +63,11 @@ HEADLESS=1
 | `CHROME_BINARY`, `CHROMEDRIVER_PATH` | Chrome/Chromium mode |
 | `REMOTE_WEBDRIVER_URL` | If set, uses remote WebDriver instead of local browser |
 | `PAGE_LOAD_TIMEOUT`, `RESULT_WAIT_SECONDS` | Tuning timeouts |
+| `MIN_PRICE_DOLLARS` | Default `2500`. Listings with a parsed rent **at or below** this (from the price line or title) are skipped as low-price noise/scams. If no price is parsed, the listing is kept. |
 
 The script sets `dom.ipc.processCount` to **1** to reduce RAM on small VMs.
+
+**Heartbeat timing:** The “still working, nothing new” message is sent at most once per `HEARTBEAT_SECONDS` when there were **no new listings** that run. Sending **new listings** or the **bootstrap init** message resets the heartbeat timer so you do not get a heartbeat a few minutes after an alert.
 
 ## Run once (manual test)
 
@@ -152,5 +155,6 @@ If the page looks blocked (captcha-like text), has zero result cards, or cards p
 
 ## Changelog (recent)
 
+- **2026-04 (later)** — Skip rents **≤ `MIN_PRICE_DOLLARS`** (default 2500); nicer Telegram blocks (blank lines, no `-` bullets); heartbeat timer resets when new listings or init is sent.
 - **2026-04** — Firefox low-memory preference (`dom.ipc.processCount`); optional Chrome and `REMOTE_WEBDRIVER_URL`; explicit `FIREFOX_BINARY` / `GECKODRIVER_PATH`; block/captcha and malformed HTML treated as errors; Pacific timestamps in Telegram.
 
