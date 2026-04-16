@@ -17,8 +17,6 @@ from zoneinfo import ZoneInfo
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options as ChromeOptions
-from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.support import expected_conditions as EC
@@ -31,15 +29,24 @@ load_dotenv()
 # CONFIG
 # =========================
 
+MIN_PRICE_URL = int(os.getenv("MIN_PRICE_URL", "2501"))
+
+
+def _with_min_price(url: str) -> str:
+    """Append `min_price=<MIN_PRICE_URL>` if not already in the query string."""
+    if re.search(r"[?&]min_price=", url):
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}min_price={MIN_PRICE_URL}"
+
+
 SEARCHES = {
-    "sf_dog_friendly": (
+    "sf_dog_friendly": _with_min_price(
         "https://sfbay.craigslist.org/search/san-francisco-ca/apa"
         "?lat=37.7739&lon=-122.434&max_price=4500"
         "&pets_dog=1&search_distance=0.6&sort=date"
     ),
 }
-
-ALLOW_KEYWORDS: List[str] = []
 
 BLOCK_KEYWORDS: List[str] = [
     "room for rent",
@@ -52,7 +59,6 @@ HEARTBEAT_FILE = STATE_DIR / "last_heartbeat_epoch.txt"
 LAST_ERROR_FILE = STATE_DIR / "last_error_hash.txt"
 
 HEARTBEAT_SECONDS = int(os.getenv("HEARTBEAT_SECONDS", "3600"))
-ERROR_NOTIFY_COOLDOWN_SECONDS = int(os.getenv("ERROR_NOTIFY_COOLDOWN_SECONDS", "900"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -62,19 +68,14 @@ PAGE_LOAD_TIMEOUT = int(os.getenv("PAGE_LOAD_TIMEOUT", "30"))
 RESULT_WAIT_SECONDS = int(os.getenv("RESULT_WAIT_SECONDS", "20"))
 JITTER_SECONDS = (1, 4)
 MAX_MESSAGE_LISTINGS = int(os.getenv("MAX_MESSAGE_LISTINGS", "12"))
-# Skip listings at or below this price (common scam range). Unparseable price = keep listing.
-MIN_PRICE_DOLLARS = float(os.getenv("MIN_PRICE_DOLLARS", "2500"))
 FIREFOX_BINARY = os.getenv("FIREFOX_BINARY", "").strip()
 GECKODRIVER_PATH = os.getenv("GECKODRIVER_PATH", "").strip()
-CHROME_BINARY = os.getenv("CHROME_BINARY", "").strip()
-CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH", "").strip()
-BROWSER = os.getenv("BROWSER", "firefox").strip().lower()
-REMOTE_WEBDRIVER_URL = os.getenv("REMOTE_WEBDRIVER_URL", "").strip()
 
 
 # =========================
 # MODELS
 # =========================
+
 
 @dataclass(frozen=True)
 class Listing:
@@ -90,6 +91,7 @@ class Listing:
 # =========================
 # STORAGE
 # =========================
+
 
 def ensure_state_dir() -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -141,7 +143,6 @@ PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
 
 def now_pacific() -> str:
-    # Example: Tue Apr 14, 10:23 AM PT
     dt = datetime.now(timezone.utc).astimezone(PACIFIC_TZ)
     tz_abbrev = dt.tzname() or "PT"
     return dt.strftime(f"%a %b %d, %I:%M %p {tz_abbrev}")
@@ -167,7 +168,6 @@ def send_telegram(message: str) -> None:
 
 
 def send_error_notification(error_key: str, message: str) -> None:
-    # Avoid spamming the same recurring error on every cron run.
     last_key = load_last_error_hash()
     if error_key != last_key:
         send_telegram(message)
@@ -175,85 +175,34 @@ def send_error_notification(error_key: str, message: str) -> None:
 
 
 # =========================
-# SELENIUM SETUP
+# SELENIUM (Firefox only)
 # =========================
 
+
 def build_driver():
-    if REMOTE_WEBDRIVER_URL:
-        if BROWSER == "chrome":
-            options = ChromeOptions()
-            if HEADLESS:
-                options.add_argument("--headless=new")
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-dev-shm-usage")
-            options.add_argument("--disable-gpu")
-            driver = webdriver.Remote(command_executor=REMOTE_WEBDRIVER_URL, options=options)
-        else:
-            options = FirefoxOptions()
-            if HEADLESS:
-                options.add_argument("--headless")
-            options.set_preference("dom.webdriver.enabled", False)
-            options.set_preference("media.peerconnection.enabled", False)
-            # Keep memory footprint low on small servers.
-            options.set_preference("dom.ipc.processCount", 1)
-            driver = webdriver.Remote(command_executor=REMOTE_WEBDRIVER_URL, options=options)
-        driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
-        return driver
+    options = FirefoxOptions()
+    if HEADLESS:
+        options.add_argument("--headless")
 
-    if BROWSER == "chrome":
-        options = ChromeOptions()
-        if HEADLESS:
-            options.add_argument("--headless=new")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
+    for candidate in (
+        FIREFOX_BINARY,
+        "/snap/firefox/current/usr/lib/firefox/firefox",
+        shutil.which("firefox"),
+    ):
+        if candidate and Path(candidate).is_file():
+            options.binary_location = candidate
+            break
 
-        binary_candidates = [
-            CHROME_BINARY,
-            shutil.which("chromium"),
-            shutil.which("chromium-browser"),
-            shutil.which("google-chrome"),
-        ]
-        for candidate in binary_candidates:
-            if candidate and Path(candidate).is_file():
-                options.binary_location = candidate
-                break
+    options.set_preference("dom.webdriver.enabled", False)
+    options.set_preference("media.peerconnection.enabled", False)
+    options.set_preference("dom.ipc.processCount", 1)
 
-        if CHROMEDRIVER_PATH:
-            service = ChromeService(executable_path=CHROMEDRIVER_PATH)
-        else:
-            service = ChromeService()
-
-        driver = webdriver.Chrome(service=service, options=options)
+    if GECKODRIVER_PATH:
+        service = FirefoxService(executable_path=GECKODRIVER_PATH)
     else:
-        options = FirefoxOptions()
-        if HEADLESS:
-            options.add_argument("--headless")
+        service = FirefoxService()
 
-        # On some Ubuntu servers, /usr/bin/firefox is a snap wrapper and Selenium
-        # needs the real binary path.
-        binary_candidates = [
-            FIREFOX_BINARY,
-            "/snap/firefox/current/usr/lib/firefox/firefox",
-            shutil.which("firefox"),
-        ]
-        for candidate in binary_candidates:
-            if candidate and Path(candidate).is_file():
-                options.binary_location = candidate
-                break
-
-        options.set_preference("dom.webdriver.enabled", False)
-        options.set_preference("media.peerconnection.enabled", False)
-        # Keep memory footprint low on small servers.
-        options.set_preference("dom.ipc.processCount", 1)
-
-        if GECKODRIVER_PATH:
-            service = FirefoxService(executable_path=GECKODRIVER_PATH)
-        else:
-            service = FirefoxService()
-
-        driver = webdriver.Firefox(service=service, options=options)
-
+    driver = webdriver.Firefox(service=service, options=options)
     driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
     return driver
 
@@ -261,6 +210,7 @@ def build_driver():
 # =========================
 # PARSING
 # =========================
+
 
 def extract_post_id(link: str) -> str:
     match = re.search(r"/(\d+)\.html", link)
@@ -275,12 +225,11 @@ def text_or_empty(parent, by: By, selector: str) -> str:
 
 
 def first_link_from_card(card) -> Optional[str]:
-    selectors = [
+    for by, selector in (
         (By.CLASS_NAME, "posting-title"),
         (By.CSS_SELECTOR, "a.posting-title"),
         (By.CSS_SELECTOR, "a"),
-    ]
-    for by, selector in selectors:
+    ):
         try:
             el = card.find_element(by, selector)
             href = el.get_attribute("href")
@@ -292,12 +241,11 @@ def first_link_from_card(card) -> Optional[str]:
 
 
 def title_from_card(card) -> str:
-    selectors = [
+    for by, selector in (
         (By.CLASS_NAME, "posting-title"),
         (By.CSS_SELECTOR, "a.posting-title"),
         (By.CSS_SELECTOR, "a"),
-    ]
-    for by, selector in selectors:
+    ):
         try:
             text = card.find_element(by, selector).text.strip()
             if text:
@@ -307,7 +255,7 @@ def title_from_card(card) -> str:
     return "(untitled)"
 
 
-def scrape_search(driver: webdriver.Firefox, search_name: str, url: str) -> List[Listing]:
+def scrape_search(driver, search_name: str, url: str) -> List[Listing]:
     driver.get(url)
 
     WebDriverWait(driver, RESULT_WAIT_SECONDS).until(
@@ -370,51 +318,14 @@ def scrape_search(driver: webdriver.Firefox, search_name: str, url: str) -> List
 # FILTERING
 # =========================
 
+
 def normalize_text(parts: Iterable[str]) -> str:
     return " ".join(parts).lower()
 
 
-def parse_price_dollars(price_text: str) -> Optional[float]:
-    """First $ amount in the string, e.g. '$3,200' -> 3200.0; also plain '3,200' in price field."""
-    if not price_text:
-        return None
-    t = price_text.strip()
-    m = re.search(r"\$\s*([\d,]+)", t)
-    if m:
-        try:
-            return float(m.group(1).replace(",", ""))
-        except ValueError:
-            return None
-    if re.fullmatch(r"[\d,]+", t):
-        try:
-            return float(t.replace(",", ""))
-        except ValueError:
-            return None
-    return None
-
-
-def listing_price_for_filter(listing: Listing) -> Optional[float]:
-    """Prefer card price; fall back to title if no price on card."""
-    p = parse_price_dollars(listing.price)
-    if p is not None:
-        return p
-    return parse_price_dollars(listing.title)
-
-
 def passes_filters(listing: Listing) -> bool:
     haystack = normalize_text([listing.title, listing.meta, listing.hood])
-
-    if ALLOW_KEYWORDS and not any(keyword.lower() in haystack for keyword in ALLOW_KEYWORDS):
-        return False
-
-    if any(keyword.lower() in haystack for keyword in BLOCK_KEYWORDS):
-        return False
-
-    price_val = listing_price_for_filter(listing)
-    if price_val is not None and price_val <= MIN_PRICE_DOLLARS:
-        return False
-
-    return True
+    return not any(kw.lower() in haystack for kw in BLOCK_KEYWORDS)
 
 
 def format_listing_block(listing: Listing) -> str:
@@ -438,7 +349,8 @@ def format_new_listing_message(new_items: List[Listing]) -> str:
 # ONE SHOT RUN (CRON FRIENDLY)
 # =========================
 
-def bootstrap_seen(driver: webdriver.Firefox, seen: Set[str]) -> int:
+
+def bootstrap_seen(driver, seen: Set[str]) -> int:
     total = 0
     for search_name, url in SEARCHES.items():
         items = scrape_search(driver, search_name, url)
@@ -501,7 +413,6 @@ def run_once() -> int:
         if should_send_heartbeat() and not filtered_new_items:
             send_heartbeat()
 
-        # If we were previously stuck in an error mode, clear dedupe marker after a good run.
         if load_last_error_hash():
             save_last_error_hash("")
 

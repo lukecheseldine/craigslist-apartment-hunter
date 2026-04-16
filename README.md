@@ -1,160 +1,80 @@
-# Craigslist Apartment Watcher (Selenium + Telegram)
+# Craigslist apartment watcher
 
-Scrapes a Craigslist apartments search and notifies you on Telegram:
+Runs a Craigslist search with **Selenium (Firefox)**, remembers seen listing IDs, and sends **Telegram** notifications for new matches. Errors and hourly “still working” heartbeats go to Telegram too.
 
-- New listings (deduped by post ID)
-- Errors (so you know when it breaks)
-- Hourly heartbeat: “still working, nothing new”
-
-Designed to be **cron-friendly**: it runs **once** and exits.
-
-## Requirements
-
-- macOS or Linux
-- Python 3.10+
-- **Firefox** (local) or **Chrome/Chromium** (optional; set `BROWSER=chrome`)
-- Geckodriver / ChromeDriver as needed (or Selenium Manager on desktop)
-
-**Headless VPS:** Prefer **1–2 GB RAM** for a single Selenium run. On **512 MB** hosts, add **swap** (e.g. 1–2 GB) or the browser may be OOM-killed. Use Mozilla’s `.deb` Firefox on Ubuntu instead of Snap-only automation when possible.
+Runs **once per invocation** (good for `cron` every minute).
 
 ## Setup
-
-From the project directory:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install selenium requests python-dotenv
+pip install -r requirements.txt
 ```
 
-Create a `.env` file (copy from your machine; never commit real tokens):
+Create `.env` (never commit it):
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `TELEGRAM_BOT_TOKEN` | yes* | — | From [@BotFather](https://t.me/BotFather) |
+| `TELEGRAM_CHAT_ID` | yes* | — | Your chat id (e.g. from `getUpdates`) |
+| `HEARTBEAT_SECONDS` | no | `3600` | Seconds between “still working, nothing new” when no new listings |
+| `HEADLESS` | no | `1` | `0` to show browser window (local debug) |
+| `MIN_PRICE_URL` | no | `2501` | Appended as `min_price=` on each search URL |
+| `FIREFOX_BINARY` | no | auto | Firefox path (often set on Linux servers) |
+| `GECKODRIVER_PATH` | no | auto | Geckodriver path (often set on Linux servers) |
+| `PAGE_LOAD_TIMEOUT` | no | `30` | Page load timeout (seconds) |
+| `RESULT_WAIT_SECONDS` | no | `20` | Max wait for result list to appear |
+| `MAX_MESSAGE_LISTINGS` | no | `12` | Cap listings per Telegram message |
+
+\*If missing, messages print to stdout instead of Telegram.
+
+Example:
 
 ```env
-TELEGRAM_BOT_TOKEN=123456:abc...
-TELEGRAM_CHAT_ID=123456789
+TELEGRAM_BOT_TOKEN=your_token
+TELEGRAM_CHAT_ID=your_chat_id
 HEARTBEAT_SECONDS=3600
-ERROR_NOTIFY_COOLDOWN_SECONDS=900
 HEADLESS=1
-
-# Optional — defaults work on macOS; on Linux VPS set explicitly:
-# BROWSER=firefox
-# FIREFOX_BINARY=/usr/bin/firefox
-# GECKODRIVER_PATH=/usr/local/bin/geckodriver
-
-# Optional — Chrome instead of Firefox:
-# BROWSER=chrome
-# CHROME_BINARY=/usr/bin/google-chrome
-# CHROMEDRIVER_PATH=/usr/bin/chromedriver
-
-# Optional — Selenium Grid / docker-selenium (remote):
-# REMOTE_WEBDRIVER_URL=http://127.0.0.1:4444/wd/hub
 ```
 
-### Environment variables
-
-| Variable | Purpose |
-|----------|---------|
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram bot API |
-| `HEARTBEAT_SECONDS` | Seconds between “still working” messages when nothing new (default 3600) |
-| `HEADLESS` | `1` = headless browser (default) |
-| `BROWSER` | `firefox` (default) or `chrome` |
-| `FIREFOX_BINARY` | Path to Firefox binary (recommended on servers) |
-| `GECKODRIVER_PATH` | Path to geckodriver (recommended on servers) |
-| `CHROME_BINARY`, `CHROMEDRIVER_PATH` | Chrome/Chromium mode |
-| `REMOTE_WEBDRIVER_URL` | If set, uses remote WebDriver instead of local browser |
-| `PAGE_LOAD_TIMEOUT`, `RESULT_WAIT_SECONDS` | Tuning timeouts |
-| `MIN_PRICE_DOLLARS` | Default `2500`. Listings with a parsed rent **at or below** this (from the price line or title) are skipped as low-price noise/scams. If no price is parsed, the listing is kept. |
-
-The script sets `dom.ipc.processCount` to **1** to reduce RAM on small VMs.
-
-**Heartbeat timing:** The “still working, nothing new” message is sent at most once per `HEARTBEAT_SECONDS` when there were **no new listings** that run. Sending **new listings** or the **bootstrap init** message resets the heartbeat timer so you do not get a heartbeat a few minutes after an alert.
-
-## Run once (manual test)
+## Run
 
 ```bash
 source .venv/bin/activate
 python craigslist_watch.py
 ```
 
-### First run behavior (bootstrap)
+**First run:** seeds current results into `state/seen_posts.json` and sends one Telegram “initialized” message. After that, only **new** post IDs trigger alerts.
 
-On the very first run, the script:
-
-- Loads the current visible results
-- Stores their post IDs in `state/seen_posts.json`
-- Sends a Telegram message like “initialized… alerts start now”
-
-After that, it only notifies on new IDs.
-
-## Cron (run every minute)
-
-Edit your crontab:
-
-```bash
-crontab -e
-```
-
-Add:
+## Cron (every minute)
 
 ```cron
-* * * * * cd /Users/lukecheseldine/Desktop/projects/craigslist && /Users/lukecheseldine/Desktop/projects/craigslist/.venv/bin/python /Users/lukecheseldine/Desktop/projects/craigslist/craigslist_watch.py >> /Users/lukecheseldine/Desktop/projects/craigslist/cron.log 2>&1
+* * * * * cd /path/to/craigslist-apartment-hunter && .venv/bin/python craigslist_watch.py >> cron.log 2>&1
 ```
 
-View logs:
+## Customize
 
-```bash
-tail -n 200 /Users/lukecheseldine/Desktop/projects/craigslist/cron.log
-```
+- **Search URLs:** edit `SEARCHES` in `craigslist_watch.py`. Each URL is passed through `_with_min_price()` so `min_price=<MIN_PRICE_URL>` is added unless you already set `min_price` in the URL.
+- **Title filters:** edit `BLOCK_KEYWORDS` (e.g. skip “room for rent”).
 
-## What’s in the Telegram “new listings” message?
+## State files (`state/`)
 
-Each listing includes a **direct link** to the posting.
+| File | Purpose |
+|------|---------|
+| `seen_posts.json` | Post IDs already seen |
+| `last_heartbeat_epoch.txt` | Last heartbeat time (Unix epoch) |
+| `last_error_hash.txt` | Dedupes repeated error Telegrams |
 
-The script pulls the listing URL from the search result card and includes it under each title.
+Heartbeats reset when you get **new listings** or the **bootstrap** message so you don’t get a heartbeat immediately after an alert.
 
-## State files
+## Linux server notes
 
-Created automatically in the `state/` folder:
+- Prefer **Mozilla’s Firefox `.deb`** + a pinned **geckodriver**, not Snap-only automation; set `FIREFOX_BINARY` and `GECKODRIVER_PATH` if needed.
+- **~1–2 GB RAM** is comfortable; add **swap** on very small hosts.
+- Timestamps in Telegram are **Pacific** (`America/Los_Angeles`).
 
-- `seen_posts.json`: list of seen post IDs (dedupe)
-- `last_heartbeat_epoch.txt`: last heartbeat timestamp
-- `last_error_hash.txt`: used to avoid spamming the same error every minute
+## Post ID → URL
 
-## Post ID → URL (what’s the URL for a post?)
-
-In practice: **you can’t reliably reconstruct the exact posting URL from only the numeric post ID**,
-because the path includes category and a title “slug”.
-
-Best options:
-
-- **Use the stored URL** (the script already captures it and sends it in the alert).
-- **Search Craigslist for the ID**:
-  - Open a search like: `https://sfbay.craigslist.org/search/apa?query=POST_ID`
-  - This usually surfaces the posting if it’s still live.
-
-## Customizing the search
-
-Edit `SEARCHES` in `craigslist_watch.py` to add more URLs.
-The script will check every configured search each run.
-
-## Robustness
-
-If the page looks blocked (captcha-like text), has zero result cards, or cards parse but no links are found, the run **raises an error** and Telegram gets an alert (with duplicate suppression). That avoids silently treating a broken page as “no new listings.”
-
-## Linux VPS (DigitalOcean, etc.)
-
-1. Clone the repo, create venv, `pip install selenium requests python-dotenv`.
-2. Install **Firefox** from [Mozilla’s apt repo](https://support.mozilla.org/en-US/kb/install-firefox-linux#w_install-from-your-distribution-package-manager) (not only the Snap stub) and a matching **geckodriver** (e.g. under `/usr/local/bin`).
-3. Set `FIREFOX_BINARY`, `GECKODRIVER_PATH`, and `BROWSER=firefox` in `.env`.
-4. Add swap if RAM is tight: `sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile`.
-5. Cron (paths are examples):
-
-```cron
-* * * * * cd /root/craigslist-apartment-hunter && /root/craigslist-apartment-hunter/.venv/bin/python /root/craigslist-apartment-hunter/craigslist_watch.py >> /root/craigslist-apartment-hunter/cron.log 2>&1
-```
-
-## Changelog (recent)
-
-- **2026-04 (later)** — Skip rents **≤ `MIN_PRICE_DOLLARS`** (default 2500); nicer Telegram blocks (blank lines, no `-` bullets); heartbeat timer resets when new listings or init is sent.
-- **2026-04** — Firefox low-memory preference (`dom.ipc.processCount`); optional Chrome and `REMOTE_WEBDRIVER_URL`; explicit `FIREFOX_BINARY` / `GECKODRIVER_PATH`; block/captcha and malformed HTML treated as errors; Pacific timestamps in Telegram.
-
+You can’t build the full listing URL from the numeric ID alone. The script already sends the real link from each result. To look up by ID manually:  
+`https://sfbay.craigslist.org/search/apa?query=POST_ID`
