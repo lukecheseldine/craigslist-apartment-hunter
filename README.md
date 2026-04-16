@@ -1,6 +1,6 @@
 # Craigslist apartment watcher
 
-Runs a Craigslist search with **Selenium (Firefox)**, remembers seen listing IDs, and sends **Telegram** notifications for new matches. Errors and hourly “still working” heartbeats go to Telegram too.
+Runs a Craigslist search with **Selenium** (defaults to **local Firefox**), remembers seen listing IDs, and sends **Telegram** notifications for new matches. Errors and hourly “still working” heartbeats go to Telegram too. You can use **local Chrome/Chromium** or a **remote** browser (e.g. `selenium/standalone-chrome` on the same VM) via env vars below.
 
 Runs **once per invocation** (good for `cron` every minute).
 
@@ -21,8 +21,12 @@ Create `.env` (never commit it):
 | `HEARTBEAT_SECONDS` | no | `3600` | Seconds between “still working, nothing new” when no new listings |
 | `HEADLESS` | no | `1` | `0` to show browser window (local debug) |
 | `MIN_PRICE_URL` | no | `2501` | Appended as `min_price=` on each search URL |
-| `FIREFOX_BINARY` | no | auto | Firefox path (often set on Linux servers) |
-| `GECKODRIVER_PATH` | no | auto | Geckodriver path (often set on Linux servers) |
+| `BROWSER` | no | `firefox` | `firefox` or `chrome` (local or with `REMOTE_WEBDRIVER_URL`) |
+| `REMOTE_WEBDRIVER_URL` | no | — | If set, use Grid / docker-selenium (e.g. `http://127.0.0.1:4444/wd/hub`) |
+| `FIREFOX_BINARY` | no | auto | Firefox path (Linux / VM) |
+| `GECKODRIVER_PATH` | no | auto | Geckodriver path (Linux / VM) |
+| `CHROME_BINARY` | no | auto | Chromium/Chrome binary path |
+| `CHROMEDRIVER_PATH` | no | auto | Chromedriver path |
 | `PAGE_LOAD_TIMEOUT` | no | `30` | Page load timeout (seconds) |
 | `RESULT_WAIT_SECONDS` | no | `20` | Max wait for result list to appear |
 | `MAX_MESSAGE_LISTINGS` | no | `12` | Cap listings per Telegram message |
@@ -68,9 +72,11 @@ python craigslist_watch.py
 
 Heartbeats reset when you get **new listings** or the **bootstrap** message so you don’t get a heartbeat immediately after an alert.
 
-## Linux server notes
+## Linux server / VM
 
-- Prefer **Mozilla’s Firefox `.deb`** + a pinned **geckodriver**, not Snap-only automation; set `FIREFOX_BINARY` and `GECKODRIVER_PATH` if needed.
+- **Firefox (typical):** Mozilla **`.deb` Firefox** + pinned **geckodriver**; set `FIREFOX_BINARY` / `GECKODRIVER_PATH` if needed. Avoid relying on Snap-only browser paths for automation.
+- **Chrome:** set `BROWSER=chrome` and `CHROME_BINARY` / `CHROMEDRIVER_PATH` if you use system Chromium.
+- **Docker Selenium** on the same host: run the container, then e.g. `REMOTE_WEBDRIVER_URL=http://127.0.0.1:4444/wd/hub` and `BROWSER=chrome` (or `firefox` to match the image).
 - **~1–2 GB RAM** is comfortable; add **swap** on very small hosts.
 - Timestamps in Telegram are **Pacific** (`America/Los_Angeles`).
 

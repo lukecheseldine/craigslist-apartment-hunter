@@ -17,6 +17,8 @@ from zoneinfo import ZoneInfo
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.support import expected_conditions as EC
@@ -68,8 +70,13 @@ PAGE_LOAD_TIMEOUT = int(os.getenv("PAGE_LOAD_TIMEOUT", "30"))
 RESULT_WAIT_SECONDS = int(os.getenv("RESULT_WAIT_SECONDS", "20"))
 JITTER_SECONDS = (1, 4)
 MAX_MESSAGE_LISTINGS = int(os.getenv("MAX_MESSAGE_LISTINGS", "12"))
+# Local Firefox (default) or Chrome; or point REMOTE_WEBDRIVER_URL at docker-selenium / Grid.
+BROWSER = os.getenv("BROWSER", "firefox").strip().lower()
 FIREFOX_BINARY = os.getenv("FIREFOX_BINARY", "").strip()
 GECKODRIVER_PATH = os.getenv("GECKODRIVER_PATH", "").strip()
+CHROME_BINARY = os.getenv("CHROME_BINARY", "").strip()
+CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH", "").strip()
+REMOTE_WEBDRIVER_URL = os.getenv("REMOTE_WEBDRIVER_URL", "").strip()
 
 
 # =========================
@@ -175,11 +182,56 @@ def send_error_notification(error_key: str, message: str) -> None:
 
 
 # =========================
-# SELENIUM (Firefox only)
+# SELENIUM
 # =========================
 
 
 def build_driver():
+    """Local Firefox (default), local Chrome, or remote Grid / docker-selenium."""
+    if REMOTE_WEBDRIVER_URL:
+        if BROWSER == "chrome":
+            opts = ChromeOptions()
+            if HEADLESS:
+                opts.add_argument("--headless=new")
+            opts.add_argument("--no-sandbox")
+            opts.add_argument("--disable-dev-shm-usage")
+            opts.add_argument("--disable-gpu")
+            driver = webdriver.Remote(command_executor=REMOTE_WEBDRIVER_URL, options=opts)
+        else:
+            opts = FirefoxOptions()
+            if HEADLESS:
+                opts.add_argument("--headless")
+            opts.set_preference("dom.webdriver.enabled", False)
+            opts.set_preference("media.peerconnection.enabled", False)
+            opts.set_preference("dom.ipc.processCount", 1)
+            driver = webdriver.Remote(command_executor=REMOTE_WEBDRIVER_URL, options=opts)
+        driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
+        return driver
+
+    if BROWSER == "chrome":
+        opts = ChromeOptions()
+        if HEADLESS:
+            opts.add_argument("--headless=new")
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
+        opts.add_argument("--disable-gpu")
+        for candidate in (
+            CHROME_BINARY,
+            shutil.which("chromium"),
+            shutil.which("chromium-browser"),
+            shutil.which("google-chrome"),
+        ):
+            if candidate and Path(candidate).is_file():
+                opts.binary_location = candidate
+                break
+        if CHROMEDRIVER_PATH:
+            svc = ChromeService(executable_path=CHROMEDRIVER_PATH)
+        else:
+            svc = ChromeService()
+        driver = webdriver.Chrome(service=svc, options=opts)
+        driver.set_page_load_timeout(PAGE_LOAD_TIMEOUT)
+        return driver
+
     options = FirefoxOptions()
     if HEADLESS:
         options.add_argument("--headless")
