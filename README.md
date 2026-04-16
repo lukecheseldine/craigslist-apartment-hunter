@@ -51,6 +51,16 @@ python craigslist_watch.py
 
 **First run:** seeds current results into `state/seen_posts.json` and sends one Telegram “initialized” message. After that, only **new** post IDs trigger alerts.
 
+## Deploy on the VM
+
+Use **git on the server**, not `scp` of the project tree. Copying files from your laptop can overwrite or mix in **`state/`**, a wrong **`.env`**, or other local-only files.
+
+1. **Push** from your machine: `git push origin main` (so `origin` has the commit you want).
+2. **SSH** into the host and go to the clone (e.g. `/root/craigslist-apartment-hunter`).
+3. **Update** the repo: `git pull` (if you hit conflicts from old manual copies, `git fetch origin && git reset --hard origin/main` matches GitHub exactly—only do that if you intend to drop stray edits on the server).
+4. **Dependencies** (when `requirements.txt` changed): `source .venv/bin/activate && pip install -r requirements.txt`
+5. **Smoke test:** `python craigslist_watch.py` — should exit `0`. Cron keeps using the same paths; no need to restart it if only code changed.
+
 ## Cron (every minute)
 
 ```cron
