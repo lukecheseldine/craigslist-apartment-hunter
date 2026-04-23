@@ -57,6 +57,7 @@ BLOCK_KEYWORDS: List[str] = [
 
 STATE_DIR = Path("state")
 SEEN_FILE = STATE_DIR / "seen_posts.json"
+SEEN_TITLES_FILE = STATE_DIR / "seen_titles.json"
 HEARTBEAT_FILE = STATE_DIR / "last_heartbeat_epoch.txt"
 LAST_ERROR_FILE = STATE_DIR / "last_error_hash.txt"
 
@@ -118,6 +119,27 @@ def load_seen() -> Set[str]:
 
 def save_seen(seen: Set[str]) -> None:
     SEEN_FILE.write_text(json.dumps(sorted(seen), indent=2), encoding="utf-8")
+
+
+def canonical_listing_title(title: str) -> str:
+    """Normalize title for dedup: trim and collapse internal whitespace."""
+    return " ".join(title.strip().split())
+
+
+def load_seen_titles() -> Set[str]:
+    if not SEEN_TITLES_FILE.exists():
+        return set()
+    try:
+        data = json.loads(SEEN_TITLES_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return {str(x) for x in data}
+    except Exception:
+        pass
+    return set()
+
+
+def save_seen_titles(seen_titles: Set[str]) -> None:
+    SEEN_TITLES_FILE.write_text(json.dumps(sorted(seen_titles), indent=2), encoding="utf-8")
 
 
 def load_last_heartbeat_epoch() -> int:
@@ -402,14 +424,16 @@ def format_new_listing_message(new_items: List[Listing]) -> str:
 # =========================
 
 
-def bootstrap_seen(driver, seen: Set[str]) -> int:
+def bootstrap_seen(driver, seen: Set[str], seen_titles: Set[str]) -> int:
     total = 0
     for search_name, url in SEARCHES.items():
         items = scrape_search(driver, search_name, url)
         total += len(items)
         for item in items:
             seen.add(item.post_id)
+            seen_titles.add(canonical_listing_title(item.title))
     save_seen(seen)
+    save_seen_titles(seen_titles)
     return total
 
 
@@ -427,11 +451,12 @@ def send_heartbeat() -> None:
 def run_once() -> int:
     ensure_state_dir()
     seen = load_seen()
+    seen_titles = load_seen_titles()
     driver = build_driver()
 
     try:
         if not seen:
-            total = bootstrap_seen(driver, seen)
+            total = bootstrap_seen(driver, seen, seen_titles)
             send_telegram(
                 f"[{now_pacific()}] Craigslist watcher initialized. "
                 f"Seeded {total} existing listings, alerts start now."
@@ -439,8 +464,18 @@ def run_once() -> int:
             save_last_heartbeat_epoch(int(time.time()))
             return 0
 
+        # Older installs only tracked post IDs; prime title memory from live results once.
+        if not seen_titles:
+            for search_name, url in SEARCHES.items():
+                items = scrape_search(driver, search_name, url)
+                for item in items:
+                    seen_titles.add(canonical_listing_title(item.title))
+                time.sleep(random.randint(*JITTER_SECONDS))
+            save_seen_titles(seen_titles)
+
         filtered_new_items: List[Listing] = []
         changed_seen = False
+        changed_titles = False
 
         for search_name, url in SEARCHES.items():
             items = scrape_search(driver, search_name, url)
@@ -450,6 +485,12 @@ def run_once() -> int:
                 seen.add(item.post_id)
                 changed_seen = True
 
+                canon = canonical_listing_title(item.title)
+                if canon in seen_titles:
+                    continue
+                seen_titles.add(canon)
+                changed_titles = True
+
                 if passes_filters(item):
                     filtered_new_items.append(item)
 
@@ -457,6 +498,8 @@ def run_once() -> int:
 
         if changed_seen:
             save_seen(seen)
+        if changed_titles:
+            save_seen_titles(seen_titles)
 
         if filtered_new_items:
             send_telegram(format_new_listing_message(filtered_new_items))

@@ -49,7 +49,7 @@ source .venv/bin/activate
 python craigslist_watch.py
 ```
 
-**First run:** seeds current results into `state/seen_posts.json` and sends one Telegram “initialized” message. After that, only **new** post IDs trigger alerts.
+**First run:** seeds current results into `state/seen_posts.json` and `state/seen_titles.json`, then sends one Telegram “initialized” message. After that, alerts fire only for listings whose **post ID is new** and whose **title** (normalized whitespace) has not been seen before—so common reposts with the same title are skipped even when Craigslist assigns a new post ID.
 
 ## Deploy on the VM
 
@@ -77,6 +77,7 @@ Use **git on the server**, not `scp` of the project tree. Copying files from you
 | File | Purpose |
 |------|---------|
 | `seen_posts.json` | Post IDs already seen |
+| `seen_titles.json` | Listing titles already seen (normalized); suppresses repost spam with new IDs |
 | `last_heartbeat_epoch.txt` | Last heartbeat time (Unix epoch) |
 | `last_error_hash.txt` | Dedupes repeated error Telegrams |
 
