@@ -60,7 +60,7 @@ SEEN_FILE = STATE_DIR / "seen_posts.json"
 HEARTBEAT_FILE = STATE_DIR / "last_heartbeat_epoch.txt"
 LAST_ERROR_FILE = STATE_DIR / "last_error_hash.txt"
 
-HEARTBEAT_SECONDS = int(os.getenv("HEARTBEAT_SECONDS", "3600"))
+HEARTBEAT_SECONDS = int(os.getenv("HEARTBEAT_SECONDS", "28800"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")

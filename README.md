@@ -1,6 +1,6 @@
 # Craigslist apartment watcher
 
-Runs a Craigslist search with **Selenium** (defaults to **local Firefox**), remembers seen listing IDs, and sends **Telegram** notifications for new matches. Errors and hourly “still working” heartbeats go to Telegram too. You can use **local Chrome/Chromium** or a **remote** browser (e.g. `selenium/standalone-chrome` on the same VM) via env vars below.
+Runs a Craigslist search with **Selenium** (defaults to **local Firefox**), remembers seen listing IDs, and sends **Telegram** notifications for new matches. Errors and periodic “still working” heartbeats (default every 8 hours) go to Telegram too. You can use **local Chrome/Chromium** or a **remote** browser (e.g. `selenium/standalone-chrome` on the same VM) via env vars below.
 
 Runs **once per invocation** (good for `cron` every minute).
 
@@ -18,7 +18,7 @@ Create `.env` (never commit it):
 |----------|----------|---------|---------|
 | `TELEGRAM_BOT_TOKEN` | yes* | — | From [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | yes* | — | Your chat id (e.g. from `getUpdates`) |
-| `HEARTBEAT_SECONDS` | no | `3600` | Seconds between “still working, nothing new” when no new listings |
+| `HEARTBEAT_SECONDS` | no | `28800` (8 hours) | Seconds between “still working, nothing new” when no new listings |
 | `HEADLESS` | no | `1` | `0` to show browser window (local debug) |
 | `MIN_PRICE_URL` | no | `2501` | Appended as `min_price=` on each search URL |
 | `BROWSER` | no | `firefox` | `firefox` or `chrome` (local or with `REMOTE_WEBDRIVER_URL`) |
@@ -38,7 +38,7 @@ Example:
 ```env
 TELEGRAM_BOT_TOKEN=your_token
 TELEGRAM_CHAT_ID=your_chat_id
-HEARTBEAT_SECONDS=3600
+HEARTBEAT_SECONDS=28800
 HEADLESS=1
 ```
 
