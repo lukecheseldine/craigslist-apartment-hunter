@@ -63,9 +63,20 @@ Use **git on the server**, not `scp` of the project tree. Copying files from you
 
 ## Cron (every minute)
 
+Use **`flock`** so a slow run cannot overlap the next minute, and send output to **`syslog`** so a single file cannot grow until the disk is full.
+
 ```cron
-* * * * * cd /path/to/craigslist-apartment-hunter && .venv/bin/python craigslist_watch.py >> cron.log 2>&1
+* * * * * flock -n /tmp/craigslist-watch.lock -c 'cd /path/to/craigslist-apartment-hunter && .venv/bin/python craigslist_watch.py 2>&1 | logger -t craigslist-watch'
 ```
+
+Recent logs: `journalctl -t craigslist-watch -n 80 --no-pager`
+
+If you prefer a file instead of syslog, append to a small log and rotate it (or truncate occasionally); **never** let an append-only `cron.log` grow unbounded on a small disk.
+
+## Troubleshooting
+
+- **`OSError: [Errno 28] No space left on device`**, geckodriver exiting with a weird status, or Telegram error spam when the disk is full: free space (`df -h`), vacuum journals (`journalctl --vacuum-size=80M`), `apt-get clean`, remove **old Snap revisions** (`snap list --all`, remove `disabled` rows), and remove unused **Snap browsers** if you use Mozilla’s `.deb` Firefox (`/opt/firefox`). A **stuck `apt-get`** (days-old process holding the apt lock) also prevents cleanup—terminate it if safe, then retry `apt-get clean`.
+- **`snap list --all` stuck or huge `/snap`**: on small droplets, consider `snap set system refresh.retain=2` so fewer old revisions are kept.
 
 ## Customize
 

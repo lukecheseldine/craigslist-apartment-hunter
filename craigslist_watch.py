@@ -105,6 +105,14 @@ def ensure_state_dir() -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def safe_write_text(path: Path, text: str) -> None:
+    """Persist state; survive ENOSPC so Telegram can still alert without crashing."""
+    try:
+        path.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        print(f"warning: could not write {path}: {exc}", file=sys.stderr)
+
+
 def load_seen() -> Set[str]:
     if not SEEN_FILE.exists():
         return set()
@@ -118,7 +126,7 @@ def load_seen() -> Set[str]:
 
 
 def save_seen(seen: Set[str]) -> None:
-    SEEN_FILE.write_text(json.dumps(sorted(seen), indent=2), encoding="utf-8")
+    safe_write_text(SEEN_FILE, json.dumps(sorted(seen), indent=2))
 
 
 def canonical_listing_title(title: str) -> str:
@@ -139,7 +147,7 @@ def load_seen_titles() -> Set[str]:
 
 
 def save_seen_titles(seen_titles: Set[str]) -> None:
-    SEEN_TITLES_FILE.write_text(json.dumps(sorted(seen_titles), indent=2), encoding="utf-8")
+    safe_write_text(SEEN_TITLES_FILE, json.dumps(sorted(seen_titles), indent=2))
 
 
 def load_last_heartbeat_epoch() -> int:
@@ -150,7 +158,7 @@ def load_last_heartbeat_epoch() -> int:
 
 
 def save_last_heartbeat_epoch(epoch: int) -> None:
-    HEARTBEAT_FILE.write_text(str(epoch), encoding="utf-8")
+    safe_write_text(HEARTBEAT_FILE, str(epoch))
 
 
 def load_last_error_hash() -> str:
@@ -161,7 +169,7 @@ def load_last_error_hash() -> str:
 
 
 def save_last_error_hash(value: str) -> None:
-    LAST_ERROR_FILE.write_text(value, encoding="utf-8")
+    safe_write_text(LAST_ERROR_FILE, value)
 
 
 # =========================
