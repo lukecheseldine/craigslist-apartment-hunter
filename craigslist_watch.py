@@ -3,6 +3,7 @@ import os
 import random
 import re
 import shutil
+import subprocess
 import sys
 import time
 import traceback
@@ -62,6 +63,14 @@ HEARTBEAT_FILE = STATE_DIR / "last_heartbeat_epoch.txt"
 LAST_ERROR_FILE = STATE_DIR / "last_error_hash.txt"
 
 HEARTBEAT_SECONDS = int(os.getenv("HEARTBEAT_SECONDS", "28800"))
+# Minimum free disk (MB) on the state dir required to launch the browser.
+# Below this, the run self-heals (journal vacuum, apt clean) and otherwise
+# exits 0 without crashing geckodriver — a full disk used to crash-loop
+# every cron tick and spam Telegram because the error-dedupe file itself
+# could not be written (ENOSPC).
+MIN_DISK_FREE_MB = int(os.getenv("MIN_DISK_FREE_MB", "150"))
+# Minimum seconds between repeat Telegram error alerts for the same error.
+ERROR_NOTIFY_COOLDOWN_SECONDS = int(os.getenv("ERROR_NOTIFY_COOLDOWN_SECONDS", "3600"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -161,15 +170,50 @@ def save_last_heartbeat_epoch(epoch: int) -> None:
     safe_write_text(HEARTBEAT_FILE, str(epoch))
 
 
-def load_last_error_hash() -> str:
+def load_last_error() -> tuple:
+    """Return (error_key, notified_epoch). File format is 'key\\nepoch';
+    old files holding just the key are treated as long-expired."""
     try:
-        return LAST_ERROR_FILE.read_text(encoding="utf-8").strip()
+        parts = LAST_ERROR_FILE.read_text(encoding="utf-8").strip().split("\n")
+        key = parts[0] if parts else ""
+        epoch = int(parts[1]) if len(parts) > 1 else 0
+        return key, epoch
     except Exception:
-        return ""
+        return "", 0
+
+
+def save_last_error(key: str, epoch: int) -> None:
+    safe_write_text(LAST_ERROR_FILE, f"{key}\n{epoch}")
+
+
+def load_last_error_hash() -> str:
+    return load_last_error()[0]
 
 
 def save_last_error_hash(value: str) -> None:
-    safe_write_text(LAST_ERROR_FILE, value)
+    save_last_error(value, int(time.time()))
+
+
+def disk_free_mb(path: Path) -> float:
+    try:
+        return shutil.disk_usage(path).free / (1024 * 1024)
+    except OSError:
+        return 0.0
+
+
+def ensure_disk_space() -> bool:
+    """Make sure there is room to run. A full disk makes geckodriver exit
+    with status 64, which crash-loops every cron tick. Try cheap, safe
+    cleanup first (journal vacuum, apt cache); return False if still low."""
+    ensure_state_dir()
+    if disk_free_mb(STATE_DIR) >= MIN_DISK_FREE_MB:
+        return True
+    for cmd in (["journalctl", "--vacuum-size=80M"], ["apt-get", "clean"]):
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=180)
+        except Exception:
+            pass
+    return disk_free_mb(STATE_DIR) >= MIN_DISK_FREE_MB
 
 
 # =========================
@@ -205,10 +249,11 @@ def send_telegram(message: str) -> None:
 
 
 def send_error_notification(error_key: str, message: str) -> None:
-    last_key = load_last_error_hash()
-    if error_key != last_key:
-        send_telegram(message)
-        save_last_error_hash(error_key)
+    last_key, last_epoch = load_last_error()
+    if error_key == last_key and (int(time.time()) - last_epoch) < ERROR_NOTIFY_COOLDOWN_SECONDS:
+        return
+    send_telegram(message)
+    save_last_error(error_key, int(time.time()))
 
 
 # =========================
@@ -529,6 +574,17 @@ def run_once() -> int:
 
 
 def main() -> None:
+    if not ensure_disk_space():
+        msg = (
+            f"[{now_pacific()}] Craigslist watcher paused: disk critically low "
+            f"(<{MIN_DISK_FREE_MB} MB free), skipping run."
+        )
+        print(msg, file=sys.stderr)
+        try:
+            send_error_notification("disk-full", msg)
+        except Exception:
+            pass
+        sys.exit(0)
     try:
         exit_code = run_once()
         sys.exit(exit_code)

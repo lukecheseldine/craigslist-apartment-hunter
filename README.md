@@ -19,6 +19,8 @@ Create `.env` (never commit it):
 | `TELEGRAM_BOT_TOKEN` | yes* | — | From [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | yes* | — | Your chat id (e.g. from `getUpdates`) |
 | `HEARTBEAT_SECONDS` | no | `28800` (8 hours) | Seconds between “still working, nothing new” when no new listings |
+| `ERROR_NOTIFY_COOLDOWN_SECONDS` | no | `3600` (1 hour) | Minimum seconds between repeat Telegram alerts for the same error |
+| `MIN_DISK_FREE_MB` | no | `150` | If free disk on `state/` drops below this, the run tries a journal vacuum + `apt-get clean`, then exits 0 without launching the browser (a full disk used to crash-loop geckodriver every minute) |
 | `HEADLESS` | no | `1` | `0` to show browser window (local debug) |
 | `MIN_PRICE_URL` | no | `2501` | Appended as `min_price=` on each search URL |
 | `BROWSER` | no | `firefox` | `firefox` or `chrome` (local or with `REMOTE_WEBDRIVER_URL`) |
