@@ -57,6 +57,7 @@ BLOCK_KEYWORDS: List[str] = [
     "mid-market",
     "mid market",
     "corona heights",
+    "tmlp",
 ]
 # Extra comma-separated keywords, e.g. BLOCK_KEYWORDS_EXTRA="mid-market,tenderloin".
 # Case-insensitive substring match against title + meta + neighborhood.
