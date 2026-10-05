@@ -53,7 +53,6 @@ SEARCHES = {
 
 BLOCK_KEYWORDS: List[str] = [
     "room for rent",
-    "sublet",
     "soma life",
     "mid-market",
     "mid market",
