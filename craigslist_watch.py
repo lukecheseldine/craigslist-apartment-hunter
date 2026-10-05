@@ -54,6 +54,12 @@ SEARCHES = {
 BLOCK_KEYWORDS: List[str] = [
     "room for rent",
     "sublet",
+    "soma life",
+]
+# Extra comma-separated keywords, e.g. BLOCK_KEYWORDS_EXTRA="mid-market,tenderloin".
+# Case-insensitive substring match against title + meta + neighborhood.
+BLOCK_KEYWORDS += [
+    kw.strip() for kw in os.getenv("BLOCK_KEYWORDS_EXTRA", "").split(",") if kw.strip()
 ]
 
 STATE_DIR = Path("state")

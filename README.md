@@ -83,7 +83,7 @@ If you prefer a file instead of syslog, append to a small log and rotate it (or 
 ## Customize
 
 - **Search URLs:** edit `SEARCHES` in `craigslist_watch.py`. Each URL is passed through `_with_min_price()` so `min_price=<MIN_PRICE_URL>` is added unless you already set `min_price` in the URL.
-- **Title filters:** edit `BLOCK_KEYWORDS` (e.g. skip “room for rent”).
+- **Title filters:** edit `BLOCK_KEYWORDS` (e.g. skip “room for rent”), or set `BLOCK_KEYWORDS_EXTRA` in `.env` as a comma-separated list (e.g. `BLOCK_KEYWORDS_EXTRA="mid-market,tenderloin"`) — no code change needed. Matching is case-insensitive substring against the title, meta, and neighborhood.
 
 ## State files (`state/`)
 
