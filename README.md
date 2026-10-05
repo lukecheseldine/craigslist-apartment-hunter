@@ -31,6 +31,8 @@ Create `.env` (never commit it):
 | `CHROMEDRIVER_PATH` | no | auto | Chromedriver path |
 | `PAGE_LOAD_TIMEOUT` | no | `30` | Page load timeout (seconds) |
 | `RESULT_WAIT_SECONDS` | no | `20` | Max wait for result list to appear |
+| `MAX_ATTEMPTS` | no | `3` | How many times to retry a run when the browser flakes (fresh browser each time) before alerting |
+| `RETRY_DELAY_SECONDS` | no | `10` | Seconds to wait between retries |
 | `MAX_MESSAGE_LISTINGS` | no | `12` | Cap listings per Telegram message |
 
 \*If missing, messages print to stdout instead of Telegram.

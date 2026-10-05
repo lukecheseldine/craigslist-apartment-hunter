@@ -88,6 +88,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 HEADLESS = os.getenv("HEADLESS", "1") != "0"
 PAGE_LOAD_TIMEOUT = int(os.getenv("PAGE_LOAD_TIMEOUT", "30"))
 RESULT_WAIT_SECONDS = int(os.getenv("RESULT_WAIT_SECONDS", "20"))
+MAX_ATTEMPTS = max(1, int(os.getenv("MAX_ATTEMPTS", "3")))
+RETRY_DELAY_SECONDS = int(os.getenv("RETRY_DELAY_SECONDS", "10"))
 JITTER_SECONDS = (1, 4)
 MAX_MESSAGE_LISTINGS = int(os.getenv("MAX_MESSAGE_LISTINGS", "12"))
 # Local Firefox (default) or Chrome; or point REMOTE_WEBDRIVER_URL at docker-selenium / Grid.
@@ -511,76 +513,101 @@ def send_heartbeat() -> None:
     save_last_heartbeat_epoch(now_epoch)
 
 
-def run_once() -> int:
-    ensure_state_dir()
-    seen = load_seen()
-    seen_titles = load_seen_titles()
-    driver = build_driver()
+def _run_once_with_driver(driver, seen: Set[str], seen_titles: Set[str]) -> int:
+    if not seen:
+        total = bootstrap_seen(driver, seen, seen_titles)
+        send_telegram(
+            f"[{now_pacific()}] Craigslist watcher initialized. "
+            f"Seeded {total} existing listings, alerts start now."
+        )
+        save_last_heartbeat_epoch(int(time.time()))
+        return 0
 
-    try:
-        if not seen:
-            total = bootstrap_seen(driver, seen, seen_titles)
-            send_telegram(
-                f"[{now_pacific()}] Craigslist watcher initialized. "
-                f"Seeded {total} existing listings, alerts start now."
-            )
-            save_last_heartbeat_epoch(int(time.time()))
-            return 0
-
-        # Older installs only tracked post IDs; prime title memory from live results once.
-        if not seen_titles:
-            for search_name, url in SEARCHES.items():
-                items = scrape_search(driver, search_name, url)
-                for item in items:
-                    seen_titles.add(canonical_listing_title(item.title))
-                time.sleep(random.randint(*JITTER_SECONDS))
-            save_seen_titles(seen_titles)
-
-        filtered_new_items: List[Listing] = []
-        changed_seen = False
-        changed_titles = False
-
+    # Older installs only tracked post IDs; prime title memory from live results once.
+    if not seen_titles:
         for search_name, url in SEARCHES.items():
             items = scrape_search(driver, search_name, url)
             for item in items:
-                if item.post_id in seen:
-                    continue
-                seen.add(item.post_id)
-                changed_seen = True
-
-                canon = canonical_listing_title(item.title)
-                if canon in seen_titles:
-                    continue
-                seen_titles.add(canon)
-                changed_titles = True
-
-                if passes_filters(item):
-                    filtered_new_items.append(item)
-
+                seen_titles.add(canonical_listing_title(item.title))
             time.sleep(random.randint(*JITTER_SECONDS))
+        save_seen_titles(seen_titles)
 
-        if changed_seen:
-            save_seen(seen)
-        if changed_titles:
-            save_seen_titles(seen_titles)
+    filtered_new_items: List[Listing] = []
+    changed_seen = False
+    changed_titles = False
 
-        if filtered_new_items:
-            send_telegram(format_new_listing_message(filtered_new_items))
-            save_last_heartbeat_epoch(int(time.time()))
+    for search_name, url in SEARCHES.items():
+        items = scrape_search(driver, search_name, url)
+        for item in items:
+            if item.post_id in seen:
+                continue
+            seen.add(item.post_id)
+            changed_seen = True
 
-        if should_send_heartbeat() and not filtered_new_items:
-            send_heartbeat()
+            canon = canonical_listing_title(item.title)
+            if canon in seen_titles:
+                continue
+            seen_titles.add(canon)
+            changed_titles = True
 
-        if load_last_error_hash():
-            save_last_error_hash("")
+            if passes_filters(item):
+                filtered_new_items.append(item)
 
-        return 0
+        time.sleep(random.randint(*JITTER_SECONDS))
 
-    finally:
+    if changed_seen:
+        save_seen(seen)
+    if changed_titles:
+        save_seen_titles(seen_titles)
+
+    if filtered_new_items:
+        send_telegram(format_new_listing_message(filtered_new_items))
+        save_last_heartbeat_epoch(int(time.time()))
+
+    if should_send_heartbeat() and not filtered_new_items:
+        send_heartbeat()
+
+    if load_last_error_hash():
+        save_last_error_hash("")
+
+    return 0
+
+
+def run_once() -> int:
+    """Run one check, retrying transient browser failures with a fresh driver."""
+    ensure_state_dir()
+    seen = load_seen()
+    seen_titles = load_seen_titles()
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        driver = None
         try:
-            driver.quit()
-        except Exception:
-            pass
+            driver = build_driver()
+            return _run_once_with_driver(driver, seen, seen_titles)
+        except (TimeoutException, WebDriverException) as exc:
+            last_exc = exc
+            if attempt < MAX_ATTEMPTS:
+                print(
+                    f"attempt {attempt}/{MAX_ATTEMPTS} failed "
+                    f"({type(exc).__name__}); retrying in {RETRY_DELAY_SECONDS}s",
+                    file=sys.stderr,
+                )
+                time.sleep(RETRY_DELAY_SECONDS)
+            else:
+                print(
+                    f"attempt {attempt}/{MAX_ATTEMPTS} failed "
+                    f"({type(exc).__name__}); giving up",
+                    file=sys.stderr,
+                )
+        finally:
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+    assert last_exc is not None
+    raise last_exc
 
 
 def main() -> None:
