@@ -22,7 +22,8 @@ Create `.env` (never commit it):
 | `ERROR_NOTIFY_COOLDOWN_SECONDS` | no | `3600` (1 hour) | Minimum seconds between repeat Telegram alerts for the same error |
 | `MIN_DISK_FREE_MB` | no | `150` | If free disk on `state/` drops below this, the run tries a journal vacuum + `apt-get clean`, then exits 0 without launching the browser (a full disk used to crash-loop geckodriver every minute) |
 | `HEADLESS` | no | `1` | `0` to show browser window (local debug) |
-| `MIN_PRICE_URL` | no | `2501` | Appended as `min_price=` on each search URL |
+| `MIN_PRICE_URL` | no | `3500` | Appended as `min_price=` on each search URL |
+| `MAX_PRICE_URL` | no | `6500` | Appended as `max_price=` on each search URL |
 | `BROWSER` | no | `firefox` | `firefox` or `chrome` (local or with `REMOTE_WEBDRIVER_URL`) |
 | `REMOTE_WEBDRIVER_URL` | no | — | If set, use Grid / docker-selenium (e.g. `http://127.0.0.1:4444/wd/hub`) |
 | `FIREFOX_BINARY` | no | auto | Firefox path (Linux / VM) |

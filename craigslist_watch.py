@@ -32,21 +32,25 @@ load_dotenv()
 # CONFIG
 # =========================
 
-MIN_PRICE_URL = int(os.getenv("MIN_PRICE_URL", "2501"))
+MIN_PRICE_URL = int(os.getenv("MIN_PRICE_URL", "3500"))
+MAX_PRICE_URL = int(os.getenv("MAX_PRICE_URL", "6500"))
 
 
-def _with_min_price(url: str) -> str:
-    """Append `min_price=<MIN_PRICE_URL>` if not already in the query string."""
-    if re.search(r"[?&]min_price=", url):
-        return url
-    sep = "&" if "?" in url else "?"
-    return f"{url}{sep}min_price={MIN_PRICE_URL}"
+def _with_price_bounds(url: str) -> str:
+    """Append min_price/max_price unless already in the query string."""
+    if not re.search(r"[?&]min_price=", url):
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}min_price={MIN_PRICE_URL}"
+    if not re.search(r"[?&]max_price=", url):
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}max_price={MAX_PRICE_URL}"
+    return url
 
 
 SEARCHES = {
-    "sf_dog_friendly": _with_min_price(
+    "sf_dog_friendly": _with_price_bounds(
         "https://sfbay.craigslist.org/search/san-francisco-ca/apa"
-        "?lat=37.7739&lon=-122.434&max_price=4500"
+        "?lat=37.7739&lon=-122.434"
         "&pets_dog=1&search_distance=0.6&sort=date"
     ),
 }
