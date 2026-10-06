@@ -33,7 +33,7 @@ load_dotenv()
 # =========================
 
 MIN_PRICE_URL = int(os.getenv("MIN_PRICE_URL", "3500"))
-MAX_PRICE_URL = int(os.getenv("MAX_PRICE_URL", "6500"))
+MAX_PRICE_URL = int(os.getenv("MAX_PRICE_URL", "6000"))
 
 
 def _with_price_bounds(url: str) -> str:
