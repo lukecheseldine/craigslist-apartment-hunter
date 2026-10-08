@@ -192,14 +192,25 @@ def save_last_heartbeat_epoch(epoch: int) -> None:
 
 def load_last_error() -> tuple:
     """Return (error_key, notified_epoch). File format is 'key\\nepoch';
-    old files holding just the key are treated as long-expired."""
+    the key may itself span lines (older saves); the epoch is the last
+    non-empty line when it parses as an int. Old key-only files are
+    treated as long-expired."""
     try:
-        lines = LAST_ERROR_FILE.read_text(encoding="utf-8").split("\n")
-        key = lines[0].strip() if lines else ""
-        epoch = int(lines[1].strip()) if len(lines) > 1 and lines[1].strip() else 0
-        return key, epoch
+        content = LAST_ERROR_FILE.read_text(encoding="utf-8")
     except Exception:
         return "", 0
+    stripped = [ln.strip() for ln in content.split("\n")]
+    while stripped and not stripped[-1]:
+        stripped.pop()
+    epoch = 0
+    if stripped:
+        try:
+            epoch = int(stripped[-1])
+            stripped = stripped[:-1]
+        except ValueError:
+            pass
+    key = " ".join(" ".join(stripped).split())
+    return key, epoch
 
 
 def save_last_error(key: str, epoch: int) -> None:
