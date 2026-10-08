@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import traceback
+from concurrent import futures
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -94,6 +95,9 @@ PAGE_LOAD_TIMEOUT = int(os.getenv("PAGE_LOAD_TIMEOUT", "30"))
 RESULT_WAIT_SECONDS = int(os.getenv("RESULT_WAIT_SECONDS", "20"))
 MAX_ATTEMPTS = max(1, int(os.getenv("MAX_ATTEMPTS", "3")))
 RETRY_DELAY_SECONDS = int(os.getenv("RETRY_DELAY_SECONDS", "10"))
+# driver.quit() can hang forever on a wedged browser; bound it so a stuck
+# shutdown can never hold the cron lock and silently stall later runs.
+DRIVER_QUIT_TIMEOUT_SECONDS = int(os.getenv("DRIVER_QUIT_TIMEOUT_SECONDS", "15"))
 JITTER_SECONDS = (1, 4)
 MAX_MESSAGE_LISTINGS = int(os.getenv("MAX_MESSAGE_LISTINGS", "12"))
 # Local Firefox (default) or Chrome; or point REMOTE_WEBDRIVER_URL at docker-selenium / Grid.
@@ -190,16 +194,17 @@ def load_last_error() -> tuple:
     """Return (error_key, notified_epoch). File format is 'key\\nepoch';
     old files holding just the key are treated as long-expired."""
     try:
-        parts = LAST_ERROR_FILE.read_text(encoding="utf-8").strip().split("\n")
-        key = parts[0] if parts else ""
-        epoch = int(parts[1]) if len(parts) > 1 else 0
+        lines = LAST_ERROR_FILE.read_text(encoding="utf-8").split("\n")
+        key = lines[0].strip() if lines else ""
+        epoch = int(lines[1].strip()) if len(lines) > 1 and lines[1].strip() else 0
         return key, epoch
     except Exception:
         return "", 0
 
 
 def save_last_error(key: str, epoch: int) -> None:
-    safe_write_text(LAST_ERROR_FILE, f"{key}\n{epoch}")
+    # Keys embed exception text; flatten newlines so the file stays parseable.
+    safe_write_text(LAST_ERROR_FILE, f"{' '.join(key.split())}\n{epoch}")
 
 
 def load_last_error_hash() -> str:
@@ -265,6 +270,7 @@ def send_telegram(message: str) -> None:
 
 
 def send_error_notification(error_key: str, message: str) -> None:
+    error_key = " ".join(error_key.split())
     last_key, last_epoch = load_last_error()
     if error_key == last_key and (int(time.time()) - last_epoch) < ERROR_NOTIFY_COOLDOWN_SECONDS:
         return
@@ -577,6 +583,31 @@ def _run_once_with_driver(driver, seen: Set[str], seen_titles: Set[str]) -> int:
     return 0
 
 
+def quit_driver(driver, timeout: int = 15) -> None:
+    """Shut the browser down, but never hang: driver.quit() can block forever
+    on a wedged browser, which would hold the cron lock and silently stall
+    every later run until the process dies."""
+    if driver is None:
+        return
+    ex = futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        fut = ex.submit(driver.quit)
+        try:
+            fut.result(timeout=timeout)
+            return
+        except Exception:
+            pass
+        # quit() hung or blew up: make sure the browser process itself dies.
+        try:
+            service = getattr(driver, "service", None)
+            if service is not None:
+                service.stop()
+        except Exception:
+            pass
+    finally:
+        ex.shutdown(wait=False)
+
+
 def run_once() -> int:
     """Run one check, retrying transient browser failures with a fresh driver."""
     ensure_state_dir()
@@ -605,11 +636,7 @@ def run_once() -> int:
                     file=sys.stderr,
                 )
         finally:
-            if driver is not None:
-                try:
-                    driver.quit()
-                except Exception:
-                    pass
+            quit_driver(driver, DRIVER_QUIT_TIMEOUT_SECONDS)
     assert last_exc is not None
     raise last_exc
 
