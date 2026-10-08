@@ -35,6 +35,7 @@ Create `.env` (never commit it):
 | `MAX_ATTEMPTS` | no | `3` | How many times to retry a run when the browser flakes (fresh browser each time) before alerting |
 | `RETRY_DELAY_SECONDS` | no | `10` | Seconds to wait between retries |
 | `DRIVER_QUIT_TIMEOUT_SECONDS` | no | `15` | Max seconds to wait for browser shutdown before force-killing it (a hung shutdown used to hold the cron lock and silently stall later runs) |
+| `STALL_WARN_SECONDS` | no | `600` | If no run has started for this long, the next alert/heartbeat notes the gap so catch-up batches are labeled |
 | `MAX_MESSAGE_LISTINGS` | no | `12` | Cap listings per Telegram message |
 
 \*If missing, messages print to stdout instead of Telegram.

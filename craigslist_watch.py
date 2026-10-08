@@ -76,6 +76,7 @@ SEEN_FILE = STATE_DIR / "seen_posts.json"
 SEEN_TITLES_FILE = STATE_DIR / "seen_titles.json"
 HEARTBEAT_FILE = STATE_DIR / "last_heartbeat_epoch.txt"
 LAST_ERROR_FILE = STATE_DIR / "last_error_hash.txt"
+LAST_RUN_START_FILE = STATE_DIR / "last_run_start_epoch.txt"
 
 HEARTBEAT_SECONDS = int(os.getenv("HEARTBEAT_SECONDS", "28800"))
 # Minimum free disk (MB) on the state dir required to launch the browser.
@@ -98,6 +99,9 @@ RETRY_DELAY_SECONDS = int(os.getenv("RETRY_DELAY_SECONDS", "10"))
 # driver.quit() can hang forever on a wedged browser; bound it so a stuck
 # shutdown can never hold the cron lock and silently stall later runs.
 DRIVER_QUIT_TIMEOUT_SECONDS = int(os.getenv("DRIVER_QUIT_TIMEOUT_SECONDS", "15"))
+# If no run has started for this long, the next alert/heartbeat says so --
+# a wedged run holding the cron lock would otherwise fail silently for hours.
+STALL_WARN_SECONDS = int(os.getenv("STALL_WARN_SECONDS", "600"))
 JITTER_SECONDS = (1, 4)
 MAX_MESSAGE_LISTINGS = int(os.getenv("MAX_MESSAGE_LISTINGS", "12"))
 # Local Firefox (default) or Chrome; or point REMOTE_WEBDRIVER_URL at docker-selenium / Grid.
@@ -188,6 +192,17 @@ def load_last_heartbeat_epoch() -> int:
 
 def save_last_heartbeat_epoch(epoch: int) -> None:
     safe_write_text(HEARTBEAT_FILE, str(epoch))
+
+
+def load_last_run_start() -> int:
+    try:
+        return int(LAST_RUN_START_FILE.read_text(encoding="utf-8").strip())
+    except Exception:
+        return 0
+
+
+def save_last_run_start(epoch: int) -> None:
+    safe_write_text(LAST_RUN_START_FILE, str(epoch))
 
 
 def load_last_error() -> tuple:
@@ -495,8 +510,10 @@ def format_listing_block(listing: Listing) -> str:
     return f"{listing.title}\n{listing.link}"
 
 
-def format_new_listing_message(new_items: List[Listing]) -> str:
+def format_new_listing_message(new_items: List[Listing], note: Optional[str] = None) -> str:
     header = f"[{now_pacific()}] New Craigslist listings: {len(new_items)}"
+    if note:
+        header += f"\n{note}"
     blocks = [format_listing_block(item) for item in new_items[:MAX_MESSAGE_LISTINGS]]
     body = "\n\n".join(blocks)
     out = f"{header}\n\n{body}"
@@ -528,13 +545,18 @@ def should_send_heartbeat() -> bool:
     return (now_epoch - load_last_heartbeat_epoch()) >= HEARTBEAT_SECONDS
 
 
-def send_heartbeat() -> None:
+def send_heartbeat(note: Optional[str] = None) -> None:
     now_epoch = int(time.time())
-    send_telegram(f"[{now_pacific()}] still working, nothing new.")
+    msg = f"[{now_pacific()}] still working, nothing new."
+    if note:
+        msg += f" {note}"
+    send_telegram(msg)
     save_last_heartbeat_epoch(now_epoch)
 
 
-def _run_once_with_driver(driver, seen: Set[str], seen_titles: Set[str]) -> int:
+def _run_once_with_driver(
+    driver, seen: Set[str], seen_titles: Set[str], stall_note: Optional[str] = None
+) -> int:
     if not seen:
         total = bootstrap_seen(driver, seen, seen_titles)
         send_telegram(
@@ -582,11 +604,11 @@ def _run_once_with_driver(driver, seen: Set[str], seen_titles: Set[str]) -> int:
         save_seen_titles(seen_titles)
 
     if filtered_new_items:
-        send_telegram(format_new_listing_message(filtered_new_items))
+        send_telegram(format_new_listing_message(filtered_new_items, note=stall_note))
         save_last_heartbeat_epoch(int(time.time()))
 
     if should_send_heartbeat() and not filtered_new_items:
-        send_heartbeat()
+        send_heartbeat(note=stall_note)
 
     if load_last_error_hash():
         save_last_error_hash("")
@@ -625,12 +647,26 @@ def run_once() -> int:
     seen = load_seen()
     seen_titles = load_seen_titles()
 
+    now_epoch = int(time.time())
+    prev_start = load_last_run_start()
+    save_last_run_start(now_epoch)
+    stall_note = None
+    if prev_start and now_epoch - prev_start > STALL_WARN_SECONDS:
+        gap = now_epoch - prev_start
+        hrs, rem = divmod(gap, 3600)
+        mins = rem // 60
+        stall_note = (
+            f"Note: no run started for ~{hrs}h{mins:02d}m before this one, "
+            f"so some listings below may be catch-up."
+        )
+        print(f"WARNING: {stall_note}", file=sys.stderr)
+
     last_exc: Optional[Exception] = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         driver = None
         try:
             driver = build_driver()
-            return _run_once_with_driver(driver, seen, seen_titles)
+            return _run_once_with_driver(driver, seen, seen_titles, stall_note)
         except (TimeoutException, WebDriverException) as exc:
             last_exc = exc
             if attempt < MAX_ATTEMPTS:
